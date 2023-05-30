@@ -39,6 +39,6 @@ python main_nerf.py data/DATASET_NAME --workspace EXPERIMENT_FILE_PATH --test_fp
 - [RAD-NeRF](https://github.com/ashawkey/RAD-NeRF)
 - [torch-ngp](https://github.com/ashawkey/torch-ngp)
 
-## else
+## Else
 
 Give this repo a star if it helps you!

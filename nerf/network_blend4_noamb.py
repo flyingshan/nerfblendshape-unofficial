@@ -108,14 +108,10 @@ class NeRFNetwork(NeRFRenderer):
             # torso deform network
             self.torso_deform_encoder, self.torso_deform_in_dim = get_encoder('frequency', input_dim=2, multires=10)
             self.pose_encoder, self.pose_in_dim = get_encoder('frequency', input_dim=6, multires=4) 
-            # self.torso_deform_net = MLP(in_ch=self.torso_deform_in_dim + self.pose_in_dim, out_ch=2, width=64, depth=3, use_bias=False) #  + self.individual_dim_torso
             self.torso_deform_net = MLP2(self.torso_deform_in_dim + self.pose_in_dim + self.opt.ind_dim_torso, 2, 64, 3)
 
             # torso color network
             self.torso_encoder, self.torso_in_dim = get_encoder('tiledgrid', input_dim=2, num_levels=16, level_dim=2, base_resolution=16, log2_hashmap_size=16, desired_resolution=2048)
-            # self.torso_net = MLP(self.torso_in_dim + self.torso_deform_in_dim + self.pose_in_dim + self.individual_dim_torso + self.audio_dim, 4, 64, 3)
-            # self.torso_net = MLP(in_ch=self.torso_in_dim + self.torso_deform_in_dim + self.pose_in_dim, out_ch=4, width=32, depth=3, use_bias=False) #  + self.individual_dim_torso
-            # [NOTE] MLP也还原一下，虽然感觉没啥区别
             self.torso_net = MLP2(self.torso_in_dim + self.torso_deform_in_dim + self.pose_in_dim + self.opt.ind_dim_torso, 4, 32, 3)
 
     def forward_torso(self, x, poses, enc_a, **kwargs):
@@ -139,8 +135,6 @@ class NeRFNetwork(NeRFRenderer):
 
         # if c is not None:
         h = torch.cat([enc_x, enc_pose.repeat(x.shape[0], 1), c], dim=-1)
-        # else:
-            # h = torch.cat([enc_x, enc_pose.repeat(x.shape[0], 1)], dim=-1)
 
         dx = self.torso_deform_net(h)
 
@@ -181,8 +175,6 @@ class NeRFNetwork(NeRFRenderer):
         ambient = torch.cat([h, expr], dim=1)
         ambient = self.ambient_net(ambient)
         ambient = torch.tanh(ambient).float()
-        # enc_w = self.encoder_ambient(ambient, bound=1)
-        # print(enc_w.shape)
 
         if kwargs['use_latent_code']:
             h = torch.cat([h,latent_code], dim = -1)
@@ -239,7 +231,6 @@ class NeRFNetwork(NeRFRenderer):
         ambient = torch.cat([h, expr], dim=1)
         ambient = self.ambient_net(ambient)
         ambient = torch.tanh(ambient).float()
-        # enc_w = self.encoder_ambient(ambient, bound=1)
 
         if kwargs['use_latent_code']:
             h = torch.cat([h,latent_code], dim = -1)

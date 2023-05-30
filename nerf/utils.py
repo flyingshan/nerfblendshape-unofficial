@@ -811,24 +811,6 @@ class Trainer(object):
             gt_rgb_patch = gt_rgb_patch.view(-1, self.opt.patch_size, self.opt.patch_size, 3).permute(0, 3, 1, 2).contiguous()
             pred_rgb_patch = pred_rgb_patch.view(-1, self.opt.patch_size, self.opt.patch_size, 3).permute(0, 3, 1, 2).contiguous()
 
-            """
-            # patch出来看起来还是有点问题
-            if not os.path.exists("/mnt/home/my-blendshape-nerf/exp/hys3s_expr/test_nbs_origin_512_fast_update/debug"):
-                os.mkdir("/mnt/home/my-blendshape-nerf/exp/hys3s_expr/test_nbs_origin_512_fast_update/debug")
-            # DEBUG:
-            print(gt_rgb_patch.shape)
-            print(pred_rgb_patch.shape)
-
-            im_pred = (pred_rgb_patch.permute(0, 2, 3, 1).detach().cpu().numpy() * 255)[0]
-            im_gt = (gt_rgb_patch.permute(0, 2, 3, 1).detach().cpu().numpy() * 255)[0]
-
-
-            im_pred = cv2.cvtColor(im_pred, cv2.COLOR_BGR2RGB)
-            im_gt = cv2.cvtColor(im_gt, cv2.COLOR_BGR2RGB)
-
-            cv2.imwrite(f"/mnt/home/my-blendshape-nerf/exp/hys3s_expr/test_nbs_origin_512_fast_update/debug/patch{str(data['index'][0])}.jpg", im_pred)
-            cv2.imwrite(f"/mnt/home/my-blendshape-nerf/exp/hys3s_expr/test_nbs_origin_512_fast_update/debug/gt_patch{str(data['index'][0])}.jpg", im_gt)
-            """
 
             # LPIPS loss [not useful...]
             loss = loss + loss_patch_lambda * self.criterion_lpips(pred_rgb_patch, gt_rgb_patch)[0]
@@ -938,51 +920,6 @@ class Trainer(object):
         pred_depth = outputs['depth'].reshape(-1, H, W)
 
         return pred_rgb, pred_depth
-
-
-    def load_mouth_data_for_sr(self, data):
-        data_mouth = {}
-        data_mouth['rays_o'] = data['mouth_train_data']['rays']['rays_o'] # [B, N, 3]
-        data_mouth['rays_d'] = data['mouth_train_data']['rays']['rays_d'] # [B, N, 3]
-        data_mouth['rays_exprs'] = data['rays_exprs'] # [B, N, 79]
-        data_mouth['bg_coords'] = data['mouth_train_data']['bg_coords_patch'] # [1, N, 2]
-        data_mouth['poses'] = data['poses'] # [B, 6]
-        # data_mouth['target_patch'] = data['mouth_train_data']['images_patch']
-        data_mouth['target_4x_patch'] = data['mouth_train_data']['images_patch_4x']
-        data_mouth['bc'] = data['mouth_train_data']['bc_patch']
-
-        # for k, v in data_mouth.items():
-        #     print(k, v.shape)
-
-        data_mouth['index'] = data['index']
-        data_mouth['pr'] = data['pr']
-        data_mouth['pc'] = data['pc']
-
-        # print(data_mouth['index'], data_mouth['pr'], data_mouth['pc'])
-
-        return data_mouth
-
-    # def save_mesh(self, save_path=None, resolution=256, threshold=10):
-
-    #     if save_path is None:
-    #         save_path = os.path.join(self.workspace, 'meshes', f'{self.name}_{self.epoch}.ply')
-
-    #     self.log(f"==> Saving mesh to {save_path}")
-
-    #     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-
-    #     def query_func(pts):
-    #         with torch.no_grad():
-    #             with torch.cuda.amp.autocast(enabled=self.fp16):
-    #                 sigma = self.model.density(pts.to(self.device))['sigma']
-    #         return sigma
-
-    #     vertices, triangles = extract_geometry(self.model.aabb_infer[:3], self.model.aabb_infer[3:], resolution=resolution, threshold=threshold, query_func=query_func)
-
-    #     mesh = trimesh.Trimesh(vertices, triangles, process=False) # important, process=True leads to seg fault...
-    #     mesh.export(save_path)
-
-    #     self.log(f"==> Finished saving mesh.")
 
 
     def loss_adjustment(self, epoch):

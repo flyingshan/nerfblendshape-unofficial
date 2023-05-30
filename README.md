@@ -1,6 +1,6 @@
 # NeRFBlendShape Unofficial Implementation
 
-This is an *UNOFFICIAL* implementation of the paper "Reconstructing Personalized Semantic Facial NeRF Models From Monocular Video". The authors released the inference code [here](https://github.com/USTC3DV/NeRFBlendShape-code), while we implements the training part according to the paper. Besides, we train a torso net based on [RAD-NeRF](https://github.com/ashawkey/RAD-NeRF). The performance of this implementation may differ from the original paper. An example test result can be found from data/example.mp4
+This is an ***UNOFFICIAL*** implementation of the paper "Reconstructing Personalized Semantic Facial NeRF Models From Monocular Video". The authors released the inference code [here](https://github.com/USTC3DV/NeRFBlendShape-code), while we implements the training part according to the paper. Besides, we train a ***torso net*** based on [RAD-NeRF](https://github.com/ashawkey/RAD-NeRF). The performance of this implementation may differ from the original paper. An example test result can be found from data/example.mp4
 
 
 ## Usage notice

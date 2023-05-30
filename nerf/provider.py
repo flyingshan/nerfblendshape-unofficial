@@ -110,72 +110,6 @@ def rand_poses(size, device, radius=1, theta_range=[np.pi/3, 2*np.pi/3], phi_ran
     return poses
 
 
-def mimg_patch_indices_generator(imsz, num_im, sz_patch, sr_ratio):
-    """
-    生成用于训练超采网络的patch光线和gt(1x, 4x)
-    imsz: [H, W]
-    num_im: 总图像数量（从所有训练集中随机取patch）
-    sz_patch: patch边长
-    """
-    def patch_gen(imsz, num_im, sz_patch):
-        H, W = imsz[0], imsz[1]
-        num_x = H // sz_patch if H % sz_patch != 0 else H // sz_patch -1
-        num_y = W // sz_patch if W % sz_patch != 0 else W // sz_patch -1
-        x = np.linspace(0, W-1, W)
-        y = np.linspace(0, H-1, H)
-        xx, yy = np.meshgrid(x, y)
-        arr_index = np.stack((yy, xx), axis=-1).astype(np.int64)
-
-        slice_x = np.linspace(1, num_x, num_x).astype(np.int64)*sz_patch
-        slcie_y = np.linspace(1, num_y, num_y).astype(np.int64)*sz_patch
-        arr_yp = np.split(arr_index, slice_x, axis=0)
-        arr_yp_last = arr_yp.pop(-1)
-        arr_yp = np.stack(arr_yp, axis=-1)
-        arr_xyp = np.split(arr_yp, slcie_y, axis=1)
-        arr_yp_last = np.split(arr_yp_last, slcie_y, axis=1)
-        arr_xp_last = arr_xyp.pop(-1)
-        arr_xp_last = list(np.moveaxis(arr_xp_last, -1, 0))
-        arr_xyp = np.concatenate(arr_xyp, axis=-1)
-        arr_xyp = list(np.moveaxis(arr_xyp, -1, 0))
-
-        arr_all = []
-        arr_all.extend(arr_xyp)
-        arr_all.extend(arr_xp_last)
-        arr_all.extend(arr_yp_last)
-
-        return arr_all
-    
-    arr_all = patch_gen(imsz, num_im, sz_patch)
-    arr_all_sr = patch_gen(imsz*sr_ratio, num_im, sz_patch*sr_ratio)
-
-    # arr: list, len = patch_num; arr[i]: (ps, ps, 2)
-    
-    num_p = len(arr_all) # 一张图片有多少patch
-    list_p = np.ones(num_p) # patch_num个1
-    list_b = [list_p*i for i in range(num_im)] # 长度为image_num, list_b[i]是patch_num个i
-    list_b = np.concatenate(list_b, axis=0) # (image_num * patch_num)
-    list_p = np.array(range(num_p)) # 0 ~ patch_num - 1
-    list_p = np.tile(list_p, num_im) # 把list_p复制num_im倍，有image_num * patch_num个元素
-    list_bp = np.stack((list_b, list_p), axis=1)
-    num_total = num_p*num_im
-    idx_im, top = torch.LongTensor(np.random.permutation(list_bp)), 0 
-    # idx_im, (image_num * patch_num, 2), 2表示每个patch属于哪个图片，第几个patch
-
-    while True:
-        if top >= num_total:
-            idx_im, top = torch.LongTensor(np.random.permutation(list_bp)), 0
-        bp_chioce = idx_im[top]
-        image_chioce, patch_ind = bp_chioce[0], bp_chioce[1]
-        patch_chioce = arr_all[patch_ind]
-        patch_4x_chioce = arr_all_sr[patch_ind]
-        top += 1
-        pr, pc = patch_chioce.shape[0], patch_chioce.shape[1]
-        patch_chioce = patch_chioce.reshape(-1, 2)
-        patch_4x_chioce = patch_4x_chioce.reshape(-1, 2)
-        patch_chioce = np.moveaxis(patch_chioce, -1, 0)
-        patch_4x_chioce = np.moveaxis(patch_4x_chioce, -1, 0)
-        yield image_chioce, list(patch_chioce[0]), list(patch_chioce[1]), list(patch_4x_chioce[0]), list(patch_4x_chioce[1]), [pr, pc]
-
 def get_coord(rect, extra_pixel, H, W):
     """修正脸部，嘴部coordinate"""
     xmin = max(0, rect[1] - extra_pixel)
@@ -344,12 +278,6 @@ class NeRFDataset:
                 self.poses = self.poses_l1
 
 
-                # [NOTE] 训练的时候不使用最后三维的话，就不需要下面的代码
-                # TODO: 将旋转角直接从blendshape中删除
-                for i in range(len(self.exprs)):
-                    # 头部姿态的bs, 此处因为pose是自己设置的，这个都固定住（虽然还是有点不合理，如果不同pose能找到bs的对应就好了）
-                    self.exprs[i][-3:] = rot2euler(np.array(transform["frames"][i]["transform_matrix"])[:3, :3])
-
         # 训练或者验证时
         else:
 
@@ -394,15 +322,12 @@ class NeRFDataset:
                 # there are non-exist paths in fox...
                 if not os.path.exists(f_path):
                     continue
-                # print('transform_matrix:',f['transform_matrix'])
                 pose = np.array(f['transform_matrix'], dtype=np.float32) # [4, 4]
-                # print('pose:',pose)
                 pose = nerf_matrix_to_ngp(pose, scale=self.scale, offset=self.offset)
 
                 image = cv2.imread(f_path, cv2.IMREAD_UNCHANGED) # [H, W, 3] o [H, W, 4]
                 
                 # mask提取
-                # print(str(f['img_id']))
                 f_path_mask = os.path.join(self.root_path, f"head_masks/",str(f['img_id'])+".png")
                 mask = cv2.imread(f_path_mask, cv2.IMREAD_GRAYSCALE)
                 mask_resize = cv2.resize(mask, (self.W, self.H), interpolation=cv2.INTER_AREA) 
@@ -419,15 +344,11 @@ class NeRFDataset:
 
                 if self.training and self.opt.torso:
                     torso_img_path = os.path.join(self.root_path, 'torso_imgs', str(f['img_id']) + '.png')
-                    # if self.preload > 0:
                     torso_img = cv2.imread(torso_img_path, cv2.IMREAD_UNCHANGED) # [H, W, 4]
                     torso_img = cv2.cvtColor(torso_img, cv2.COLOR_BGRA2RGBA)
                     torso_img = torso_img.astype(np.float32) / 255 # [H, W, 3/4]
 
                     torso_img_resize = cv2.resize(torso_img, (self.W, self.H), interpolation=cv2.INTER_AREA) 
-                    # if self.preload == 0:
-                    #     self.torso_img.append(torso_img_path) 
-                    # else:
                     self.torso_img.append(torso_img_resize)
 
 
@@ -547,31 +468,7 @@ class NeRFDataset:
         self.intrinsics = np.array([fl_x, fl_y, cx, cy])
 
         # super resolution
-        if self.opt.use_sr:
-            sr_ratio = self.downscale
-            sz_patch = self.opt.sr_patch_size
-            K = np.array([
-                [fl_x, 0, cx],
-                [0, fl_x, cy],
-                [0, 0, 1]
-            ])
-            Ks = K[None].repeat(len(self.poses), axis=0)
-            self.Ks = Ks
-            if self.images_resize is not None:
-                self.HW = np.array([im.shape[:2] for im in self.images_resize])
-                rgb_tr_ori = self.images_resize.to(self.device)
-                rgb_tr, rays_o_tr, rays_d_tr, viewdirs_tr, imsz = get_training_rays(
-                    rgb_tr=rgb_tr_ori,
-                    train_poses=self.poses,
-                    HW=self.HW, Ks=Ks, ndc=False)
-                index_generator = mimg_patch_indices_generator(self.HW[0], len(self.poses), sz_patch, sr_ratio)
-                batch_index_sampler = lambda: next(index_generator)
-                self.rgb_tr, self.rays_o_tr, self.rays_d_tr, self.viewdirs_tr, self.imsz, self.batch_index_sampler = rgb_tr, rays_o_tr, rays_d_tr, viewdirs_tr, imsz, batch_index_sampler 
-                if self.preload < 2:
-                    self.rgb_srgt_train = self.images
-                else:
-                    self.rgb_srgt_train = self.images.to(self.device)  # TODO: preload为0/1, 这里会有问题
-            self.Ks = torch.from_numpy(self.Ks).to(self.device)
+
 
         self.bg_coords = get_bg_coords(self.H, self.W, self.device) # [1, H*W, 2] in [-1, 1]
         print("Dataset initialization Done!")
@@ -638,9 +535,6 @@ class NeRFDataset:
 
             bg_coords = torch.gather(self.bg_coords, 1, torch.stack(2 * [rays_patch['inds']], -1)) # [1, N, 2]
             results['bg_coords_patch'] = bg_coords
-            # print("*"*50)
-            # print(rays_patch['inds'])
-            # print(bg_coords)
 
         if self.images is not None:
             images = self.images[index]

@@ -712,149 +712,6 @@ class Trainer(object):
                 self.log_ptr.flush() # write immediately to file
 
 
-
-    def train_step_sr(self, data, debug_flag=False):
-        """
-        目前设定是只在>pretrained_epoch使用[TODO: pretrained epoch这个参数是否必要有待商榷], 该函数只计算sr网络的loss, 只训练sr网络
-        """
-        rays_o = data['rays_o'] # [B, N, 3]
-        rays_d = data['rays_d'] # [B, N, 3]
-        rays_exprs = data['rays_exprs'] # [B, N, 79]
-        bg_coords = data['bg_coords'] # [1, N, 2]
-        poses = data['poses'] # [B, 6]
-
-        # target_rgb = data['target_patch']
-        target_rgb_4x = data['target_4x_patch']
-
-        args_dict = vars(self.opt)
-        if self.opt.use_latent_code:
-            args_dict['index'] = data['index']
-            args_dict['mode'] = 'train'
-        if self.opt.use_bc:
-            bg_color = data['bc']
-        else:
-            bg_color = 1
-
-        outputs = self.model.render(rays_o, rays_d, rays_exprs, bg_coords, poses, staged=False, bg_color=bg_color, perturb=True, force_all_rays=False, **args_dict)
-        pred_rgb = outputs['image']
-        
-        # latent_code_loss
-        if self.opt.use_latent_code:
-            loss_latent_code = torch.norm(outputs['latent_code']) * self.opt.loss_latent_code_lambda
-        else:
-            loss_latent_code = None
-
-        # mask loss
-        pred_rgb_patch = pred_rgb.view(-1, self.opt.sr_patch_size, self.opt.sr_patch_size, 3).permute(0, 3, 1, 2).contiguous()
-        # loss_perceptual = self.criterion_lpips(pred_rgb_patch, gt_rgb_patch)[0] * self.opt.loss_patch_lambda
-        loss = 0.
-        # loss = loss + loss_photo.mean()
-        loss = loss + loss_latent_code.mean() if self.opt.use_latent_code else loss # [B, N, 3] --> [B, N]
-
-        pr, pc = data['pr'], data['pc']
-        input_cond = outputs['depth'].reshape(1, pr, pc, 1).movedim(-1, 1).detach()
-        pred_rgb_4x   = self.net_sr(pred_rgb_patch, input_cond)
-        target_rgb_4x = data['target_4x_patch'].detach().reshape(self.opt.downscale*pr, self.opt.downscale*pc, 3).movedim(-1, 0).unsqueeze(0)
-        loss_photo_sr = self.criterion(pred_rgb_4x, target_rgb_4x).reshape(1, -1).mean() * self.opt.loss_sr_photo_lambda
-        loss_perceptual = self.criterion_lpips(pred_rgb_4x, target_rgb_4x)[0] * self.opt.loss_sr_patch_lambda
-        
-        loss = loss + loss_photo_sr + loss_perceptual
-        loss = loss + self.criterion_tv(pred_rgb_4x, target_rgb_4x)
-        # loss = loss.mean()
-        # if enable_sr_forward:
-        return pred_rgb_4x, target_rgb_4x, loss
-        # else:
-        #     return pred_rgb, target_rgb, loss
-
-    
-    def calc_loss_one_modal(self, data, outputs, outputs_patch=None):
-        face_mask = data['face_mask'] # [B, N]
-        
-        if not self.opt.torso:
-            images = data['images'] # [B, N, 3]
-        else:
-            images = data['bg_torso_color']
-
-        B, N, C = images.shape
-        # [NOTE: provider里面保证images和torso都是3d的]
-        bg_color = 1
-        if C == 4:
-            gt_rgb = images[..., :3] * images[..., 3:] + bg_color * (1 - images[..., 3:])
-        else:
-            gt_rgb = images
-    
-        if not self.opt.torso:
-            pred_rgb = outputs['image']
-        else:
-            pred_rgb = outputs['torso_color']
-
-        loss_latent_code_lambda = self.opt.loss_latent_lambda
-        loss_weights_lambda = self.opt.loss_mask_lambda
-        loss_patch_lambda = self.opt.loss_patch_lambda
-
-        # latent_code_loss
-        if self.opt.use_latent_code:
-            loss_latent_code = torch.norm(outputs['latent_code']) * loss_latent_code_lambda
-        else:
-            loss_latent_code = None
-
-        # weight loss
-        if self.opt.use_mask_loss:
-            if not self.opt.torso:
-                loss_weights = background_loss = F.l1_loss(
-                    outputs['weights_sum'], data['masks'].squeeze() / 255., reduction='none'
-                    ).unsqueeze(0) * loss_weights_lambda
-        else:
-            loss_weights = None
-
-        if self.opt.torso:
-            alphas = outputs['torso_alpha'].clamp(1e-5, 1 - 1e-5)
-            # alphas = alphas ** 2 # skewed entropy, favors 0 over 1
-            loss_ws = - alphas * torch.log2(alphas) - (1 - alphas) * torch.log2(1 - alphas)
-
-        loss = self.criterion(pred_rgb, gt_rgb).mean(-1)
-
-        if self.opt.torso:
-            loss = loss + 1e-4 * loss_ws.mean()
-        else:
-            loss = loss + loss_latent_code if self.opt.use_latent_code else loss# [B, N, 3] --> [B, N]
-            if self.opt.use_mask_loss:
-                loss = loss + loss_weights #  if loss_weights is not None else loss# [B, N, 3] --> [B, N]
-
-        # patch-based rendering
-        if self.opt.use_patch_loss:
-            if not self.opt.torso:
-                pred_rgb_patch = outputs_patch['image']
-            else:
-                pred_rgb_patch = outputs_patch['torso_color']
-            # gt_rgb_patch = data['images_patch']
-            if not self.opt.torso:
-                gt_rgb_patch = data['images_patch'] # [B, N, 3]
-            else:
-                gt_rgb_patch = data['bg_torso_color_patch']
-
-            gt_rgb_patch = gt_rgb_patch.view(-1, self.opt.patch_size, self.opt.patch_size, 3).permute(0, 3, 1, 2).contiguous()
-            pred_rgb_patch = pred_rgb_patch.view(-1, self.opt.patch_size, self.opt.patch_size, 3).permute(0, 3, 1, 2).contiguous()
-
-            # perceptual loss
-            # TODO: patch没有rgb loss, check是否合理
-            loss = loss + loss_patch_lambda * self.criterion_lpips(pred_rgb_patch, gt_rgb_patch)[0]
-            loss = loss + self.criterion_tv(pred_rgb_patch, gt_rgb_patch)
-            # loss = loss + self.criterion(pred_rgb_patch, gt_rgb_patch).mean() # rgb_loss
-        
-        if not self.opt.torso:
-            ambient = outputs['ambient'] # [N], abs sum
-            loss_amb = (ambient * (~face_mask.view(-1))).mean()
-            # gradually increase it
-            lambda_amb = min(self.global_step / self.opt.iters, 1.0) * self.opt.loss_amb_lambda
-            # lambda_amb = self.opt.lambda_amb
-            loss = loss + lambda_amb * loss_amb
-
-
-        loss = loss.mean()
-        return loss
-
-
     def train_step(self, data):
         """
         目前设定是只在use_sr，且<=pretrained_epoch
@@ -1024,17 +881,6 @@ class Trainer(object):
         bg_coords = data['bg_coords'] # [1, N, 2]
         poses = data['poses'] # [B, 6]
 
-        # if self.opt.use_sr:
-        #     target_rgb = data['target_patch']
-        #     target_rgb_4x = data['target_4x_patch']
-        #     images = data['gt_imgs']
-        #     gt_rgb = target_rgb
-        #     B, H, W, C = images.shape
-        #     print(images.shape)
-        # else:
-        # if self.opt.use_sr:
-        #     images = data['images_resize'] # [B, H, W, 3/4]
-        # else:
         images = data['images']
 
         B, H, W, C = images.shape
@@ -1045,9 +891,7 @@ class Trainer(object):
         # print('rays_exprs:',rays_exprs,rays_exprs.shape)
         args_dict = vars(self.opt)
         if self.opt.use_bc:
-            # if self.opt.use_sr:
-            #     bg_color = data['bc_resize']
-            # else:
+
             bg_color = data['bc']
         if self.opt.use_latent_code:
             args_dict['index'] = data['index']
@@ -1060,83 +904,10 @@ class Trainer(object):
         # print(outputs['image'].shape)
         pred_rgb = outputs['image'].reshape(B, H, W, 3)
         pred_depth = outputs['depth'].reshape(B, H, W)
-        # if self.opt.use_sr:
-        #     input_cond = outputs['depth'].reshape(1, H, W, 1).movedim(-1, 1).detach()
-        #     pred_rgb   = self.net_sr(pred_rgb.permute(0, 3, 1, 2).contiguous(), input_cond).clamp(0, 1)
-        #     # pred_rgb_4x = torch.clamp(pred_rgb_4x, )
-        #     pred_rgb = pred_rgb.permute(0, 2, 3, 1)
-        #     gt_rgb = data['images'].detach().reshape(self.opt.downscale*H, self.opt.downscale*W, 3).unsqueeze(0)
+
         loss = self.criterion(pred_rgb, gt_rgb).mean()
         return pred_rgb, pred_depth, gt_rgb, loss
 
-
-    def eval_step_sr(self, data):
-
-        rays_o = data['rays_o'] # [B, N, 3]
-        rays_d = data['rays_d'] # [B, N, 3]
-        rays_exprs = data['rays_exprs']# [B, N, 79]
-        images = data['images'] # [B, H, W, 3/4]
-        bg_coords = data['bg_coords'] # [1, N, 2]
-        poses = data['poses'] # [B, 6]
-
-        B, H, W, C = images.shape
-        gt_rgb = images
-
-        # eval with fixed background color
-        bg_color = 1
-        # print('rays_exprs:',rays_exprs,rays_exprs.shape)
-        args_dict = vars(self.opt)
-        if self.opt.use_bc:
-            bg_color = data['bc']
-        if self.opt.use_latent_code:
-            args_dict['index'] = data['index']
-            args_dict['mode'] = 'val'
-
-        outputs = self.model.render(rays_o, rays_d, rays_exprs, bg_coords, poses, staged=True, bg_color=bg_color, perturb=False, **args_dict)
-
-        pred_rgb = outputs['image'].reshape(B, H, W, 3)
-        pred_depth = outputs['depth'].reshape(B, H, W)
-
-        input_cond = outputs['depth'].reshape(1, H, W, 1).movedim(-1, 1).detach()
-        pred_rgb_4x = self.net_sr(pred_rgb.permute(0, 3, 1, 2).contiguous(), input_cond).clamp(0, 1)
-        pred_rgb_4x = pred_rgb_4x.permute(0, 2, 3, 1)
-        gt_rgb_4x = data['images_ori'].detach().reshape(self.opt.downscale*H, self.opt.downscale*W, 3).unsqueeze(0)
-
-        # print(pred_rgb_4x.shape, gt_rgb_4x.shape)
-        loss = self.criterion(pred_rgb_4x, gt_rgb_4x).mean()
-
-        # 把nerf的小图结果输出
-        return pred_rgb_4x, pred_depth, gt_rgb_4x, loss, pred_rgb
-
-    # moved out bg_color and perturb for more flexible control...
-    def test_step_audio(self, data, bg_color=None, perturb=False):  
-
-        rays_o = data['rays_o'] # [B, N, 3]
-        rays_d = data['rays_d'] # [B, N, 3]
-        rays_exprs = data['rays_exprs']# [B, N, 79]
-        bg_coords = data['bg_coords'] # [1, N, 2]
-        poses = data['poses'] # [B, 6]
-        # rays_patch = data['rays_patch'] if self.opt.use_patch_loss else None
-        H, W = data['H'], data['W']
-
-        if bg_color is not None:
-            bg_color = bg_color.to(self.device)
-
-        # use latent code
-        args_dict = vars(self.opt)
-        if self.opt.use_bc:
-            bg_color = data['bc']
-
-        if self.opt.use_latent_code:
-            args_dict['index'] = data['index']
-            args_dict['mode'] = 'test'
-
-        outputs = self.model.render(rays_o, rays_d, rays_exprs, bg_coords, poses, staged=True, bg_color=bg_color, perturb=perturb, **args_dict)
-
-        pred_rgb = outputs['image'].reshape(-1, H, W, 3)
-        pred_depth = outputs['depth'].reshape(-1, H, W)
-
-        return pred_rgb, pred_depth
 
     # moved out bg_color and perturb for more flexible control...
     def test_step(self, data, bg_color=None, perturb=False):  
@@ -1168,39 +939,6 @@ class Trainer(object):
 
         return pred_rgb, pred_depth
 
-
-    def test_step_sr(self, data, bg_color=None, perturb=False):  
-
-        rays_o = data['rays_o'] # [B, N, 3]
-        rays_d = data['rays_d'] # [B, N, 3]
-        rays_exprs = data['rays_exprs']# [B, N, 79]
-        bg_coords = data['bg_coords'] # [1, N, 2]
-        poses = data['poses'] # [B, 6]
-
-        # rays_patch = data['rays_patch'] if self.opt.use_patch_loss else None
-        H, W = data['H'], data['W']
-
-        if bg_color is not None:
-            bg_color = bg_color.to(self.device)
-
-        # use latent code
-        args_dict = vars(self.opt)
-        if self.opt.use_bc:
-            bg_color = data['bc']
-            # print(data['bc'].shape)
-
-        if self.opt.use_latent_code:
-            args_dict['index'] = data['index']
-            args_dict['mode'] = 'test'
-        outputs = self.model.render(rays_o, rays_d, rays_exprs, bg_coords, poses, staged=True, bg_color=bg_color, perturb=perturb, **args_dict)
-
-        pred_rgb = outputs['image'].reshape(-1, H, W, 3)
-        pred_depth = outputs['depth'].reshape(-1, H, W)
-
-        input_cond = outputs['depth'].reshape(-1, H, W, 1).movedim(-1, 1).detach()
-        pred_rgb_4x = self.net_sr(pred_rgb.permute(0, 3, 1, 2).contiguous(), input_cond).clamp(0, 1).permute(0, 2, 3, 1)
-
-        return pred_rgb_4x, pred_depth
 
     def load_mouth_data_for_sr(self, data):
         data_mouth = {}
@@ -1359,8 +1097,6 @@ class Trainer(object):
 
         pbar = tqdm.tqdm(total=len(loader) * loader.batch_size, bar_format='{percentage:3.0f}% {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
         self.model.eval()
-        if self.opt.use_sr:
-            self.net_sr.eval()
 
         if write_video:
             all_preds = []
@@ -1369,17 +1105,7 @@ class Trainer(object):
         with torch.no_grad():
             for i, data in enumerate(loader):
                 with torch.cuda.amp.autocast(enabled=self.fp16):
-
-
-                    # 测试语音的
-                    if self.opt.test_audio:
-                        preds, preds_depth = self.test_step_audio(data)
-                    else:
-                        # 测试表情系数的
-                        if self.opt.use_sr:
-                            preds, preds_depth = self.test_step_sr(data)
-                        else:
-                            preds, preds_depth = self.test_step(data)
+                    preds, preds_depth = self.test_step(data)
 
                 if self.opt.color_space == 'linear':
                     preds = linear_to_srgb(preds)
@@ -1417,15 +1143,6 @@ class Trainer(object):
         
         self.model.train()
 
-        # 训练超分的时候，model无需反传
-        if self.opt.use_sr and self.epoch > self.opt.nerf_pretrained_epoch:
-            self.model.eval()
-        
-        # 训练超分的时候，net_sr也训练
-        if self.opt.use_sr:
-            self.net_sr.train()
-    
-
         # distributedSampler: must call set_epoch() to shuffle indices across multiple epochs
         # ref: https://pytorch.org/docs/stable/data.html
         if self.world_size > 1:
@@ -1440,31 +1157,19 @@ class Trainer(object):
             
             # update grid every 16 steps
             if self.model.cuda_ray and self.global_step % self.opt.update_extra_interval == 0:
-                if not (self.opt.use_sr):
-                    with torch.cuda.amp.autocast(enabled=self.fp16):
-                        args_dict = {'use_latent_code': self.opt.use_latent_code, 'mode': 'train'}
-                        if self.opt.use_latent_code:
-                            args_dict['index'] = data['index']
-                        self.model.update_extra_state(data, **args_dict)
+                with torch.cuda.amp.autocast(enabled=self.fp16):
+                    args_dict = {'use_latent_code': self.opt.use_latent_code, 'mode': 'train'}
+                    if self.opt.use_latent_code:
+                        args_dict['index'] = data['index']
+                    self.model.update_extra_state(data, **args_dict)
 
             self.local_step += 1
             self.global_step += 1
 
             self.optimizer.zero_grad()
-            if self.opt.use_sr:
-                self.optimizer_sr.zero_grad(set_to_none=True)
 
             with torch.cuda.amp.autocast(enabled=self.fp16):
-                # TODO: 梳理逻辑
-                if self.opt.use_sr:
-                    preds, truths, loss = self.train_step_sr(data)
-                    # 嘴部patch单独forward一次（脸部patch也很好加）
-                    data_mouth = self.load_mouth_data_for_sr(data)
-                    preds_mouth, truths_mouth, loss_mouth = self.train_step_sr(data_mouth, True)
-                    loss = loss + loss_mouth
-                
-                else:
-                    preds, truths, loss = self.train_step(data)
+                preds, truths, loss = self.train_step(data)
 
             if torch.any(torch.isnan(loss)):
                 print("Loss is nan! Ignore current step!")
@@ -1475,8 +1180,6 @@ class Trainer(object):
             # if self.epoch <= self.opt.nerf_pretrained_epoch:
 
             self.scaler.step(self.optimizer)
-            if self.opt.use_sr:
-                self.optimizer_sr.step()
             # TODO: 理论上a2e只需要step下面这一步就行，上面不需要
             self.scaler.update()
 

@@ -608,21 +608,6 @@ class Trainer(object):
             self.criterion_lpips = PerceptualLoss(layer_weights=pcplayer_weight, vgg_type='vgg19', perceptual_weight=0.5, style_weight=0.2).to(self.device)
             self.criterion_tv = WeightedTVLoss(loss_weight=0.01)
 
-        if self.opt.use_sr:
-            # 网络结构定义
-            dim_rend = 3
-            sr_ratio = opt.downscale
-            num_cond = 1
-            self.net_sr = sr_esrnet.SFTNet(n_in_colors=dim_rend, scale=sr_ratio, num_feat=64, num_block=2, num_grow_ch=32, num_cond=num_cond, dswise=False).to(self.device)
-            # ftsr_path = '/home/zhangyan/dyngp/ckpts/RealESRNet_x4plus.pth'
-            self.net_sr.load_network(load_path=opt.sr_path, device=device, strict=False)
-
-            # 优化器
-            param_sr = []
-            lrate_srnet = 2e-4
-            param_sr.append({'params': self.net_sr.parameters(), 'lr': lrate_srnet, 'kname': 'srnet', 'skip_zero_grad': (False)})
-            self.optimizer_sr = MaskedAdam(param_sr)
-
         if optimizer is None:
             self.optimizer = optim.Adam(self.model.parameters(), lr=0.001, weight_decay=5e-4) # naive adam
         else:

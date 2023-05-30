@@ -183,9 +183,6 @@ class NeRFRenderer(nn.Module):
             counter.zero_() # set to 0
             self.local_step += 1
             
-            # print(rays_o.shape)
-            # print(rays_d.shape)
-
             xyzs, dirs, deltas, rays = raymarching.march_rays_train(rays_o, rays_d, self.bound, self.density_bitfield, self.cascade, self.grid_size, nears, fars, counter, self.mean_count, perturb, 128, force_all_rays, dt_gamma, max_steps)
             exprs = rays_expr # [1, expr_dim]
             #plot_pointcloud(xyzs.reshape(-1, 3).detach().cpu().numpy())
@@ -406,7 +403,6 @@ class NeRFRenderer(nn.Module):
 
             # dilate
             tmp_grid_torso = tmp_grid_torso.view(1, 1, self.grid_size, self.grid_size)
-            # tmp_grid_torso = F.max_pool2d(tmp_grid_torso, kernel_size=3, stride=1, padding=1)
             tmp_grid_torso = F.max_pool2d(tmp_grid_torso, kernel_size=5, stride=1, padding=2)
             tmp_grid_torso = tmp_grid_torso.view(-1)
 
@@ -418,7 +414,6 @@ class NeRFRenderer(nn.Module):
             tmp_grid_max_expr = torch.zeros_like(self.density_grid)
 
             for i in range(1, self.opt.expr_dim):
-                # 为了速度，随机选其中一些表情维度，取最大值更新
 
                 rays_expr = torch.zeros_like(self.expr_max)
                 rays_expr[:, 0] = self.expr_max[:, 0]
@@ -453,12 +448,6 @@ class NeRFRenderer(nn.Module):
                                 density_result_dict = self.density(cas_xyzs, rays_expr, **kwargs)
                                 sigmas = density_result_dict['sigma'].reshape(-1).detach().to(tmp_grid.dtype)
                                 sigmas *= self.density_scale
-                                if self.opt.network == "blend4_warp":
-                                    warpped_xyzs = density_result_dict["delta_x"]
-                                    coords_revert = (warpped_xyzs / (bound - half_grid_size)).clamp(-1., 1.)
-                                    coords_revert = (coords_revert + 1.) * (self.grid_size - 1.) / 2.
-                                    indices = raymarching.morton3D(coords_revert).long()
-                                    # ((warpped_xyzs + 1) * (self.grid_size - 1) / 2).long()
                                 # assign 
                                 tmp_grid[cas, indices] = sigmas
                 
@@ -467,11 +456,9 @@ class NeRFRenderer(nn.Module):
                 tmp_grid_max_expr = torch.maximum(tmp_grid_max_expr, tmp_grid)
 
             # ema update
-            # tmp_grid = tmp_grid_max_expr # TODO: work的话更换下面的名称
             valid_mask = (self.density_grid >= 0) & (tmp_grid_max_expr >= 0)
             self.density_grid[valid_mask] = torch.maximum(self.density_grid[valid_mask] * decay, tmp_grid_max_expr[valid_mask])
             self.mean_density = torch.mean(self.density_grid.clamp(min=0)).item() # -1 regions are viewed as 0 density.
-            #self.mean_density = torch.mean(self.density_grid[self.density_grid > 0]).item() # do not count -1 regions
             self.iter_density += 1
 
             # convert to bitfield

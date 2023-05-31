@@ -520,27 +520,27 @@ def extract_head_masks(parsing_dir, head_masks_dir, only_head=True):
     print(f'[INFO] ===== finished extracting head masks =====')
 
 
-def extract_blendshape(path, out_path, add_mean=True):
-    print(f'[INFO] ===== extract blendshape without smoothing...=====')
-    cmd = f'python data_utils/bs_solver/inference.py --img_path {path} --save_path {out_path}'
-    os.system(cmd)
-    # save min/max expr blendshape for trainset
-    expr_temp = np.load(os.path.join(out_path, 'expr.npy'))
-    expr_temp = expr_temp[:-500, :]
-    expr_min = expr_temp.min(axis=0)
-    expr_max = expr_temp.max(axis=0)
-    expr_mean = expr_temp.mean(axis=0)
-    if add_mean:
-        expr_min = np.concatenate([np.array([1.0]), expr_min])
-        expr_max = np.concatenate([np.array([1.0]), expr_max])
-        expr_mean = np.concatenate([np.array([1.0]), expr_mean])
-    np.save(os.path.join(out_path, 'expr_min.npy'), expr_min)
-    np.save(os.path.join(out_path, 'expr_max.npy'), expr_max)
-    np.save(os.path.join(out_path, 'expr_mean.npy'), expr_mean)
+# def extract_blendshape(path, out_path, add_mean=True):
+#     print(f'[INFO] ===== extract blendshape without smoothing...=====')
+#     cmd = f'python data_utils/bs_solver/inference.py --img_path {path} --save_path {out_path}'
+#     os.system(cmd)
+#     # save min/max expr blendshape for trainset
+#     expr_temp = np.load(os.path.join(out_path, 'expr.npy'))
+#     expr_temp = expr_temp[:-500, :]
+#     expr_min = expr_temp.min(axis=0)
+#     expr_max = expr_temp.max(axis=0)
+#     expr_mean = expr_temp.mean(axis=0)
+#     if add_mean:
+#         expr_min = np.concatenate([np.array([1.0]), expr_min])
+#         expr_max = np.concatenate([np.array([1.0]), expr_max])
+#         expr_mean = np.concatenate([np.array([1.0]), expr_mean])
+#     np.save(os.path.join(out_path, 'expr_min.npy'), expr_min)
+#     np.save(os.path.join(out_path, 'expr_max.npy'), expr_max)
+#     np.save(os.path.join(out_path, 'expr_mean.npy'), expr_mean)
 
-    print(f'[INFO] ===== extract blendshape with smoothing...=====')
-    cmd = f'python data_utils/bs_solver/inference.py --img_path {path} --save_path {out_path} --use_smooth'
-    os.system(cmd)
+#     print(f'[INFO] ===== extract blendshape with smoothing...=====')
+#     cmd = f'python data_utils/bs_solver/inference.py --img_path {path} --save_path {out_path} --use_smooth'
+#     os.system(cmd)
 
 def extract_gt_test_video(path, out_path, num_frames_test=800, fps=30):
     print(f'[INFO] ===== extract gt test video for {path} with test frames {num_frames_test}...=====')
@@ -646,8 +646,8 @@ if __name__ == '__main__':
         save_transforms(base_dir, ori_imgs_dir)
     
     # extract blendshape
-    if opt.task == -1 or opt.task == 13:
-        extract_blendshape(gt_imgs_dir, base_dir)
+#     if opt.task == -1 or opt.task == 13:
+#         extract_blendshape(gt_imgs_dir, base_dir)
     
     # extract testset video
     if opt.task == -1 or opt.task == 14:

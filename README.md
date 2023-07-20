@@ -5,7 +5,7 @@ This is an ***UNOFFICIAL*** implementation of the paper "Reconstructing Personal
 
 ## Usage notice
 
-This implementation relies on a private blendshape extractor which can not be open-source, so you could try using the FaceWarehouse from the original paper or using other blendshape basis like BFM2009. 
+This implementation relies on a private blendshape extractor which can not be open-source, so you could try using the FaceWarehouse from the original paper or using other blendshape basis like BFM2009. This repo -> (https://github.com/sicxu/Deep3DFaceRecon_pytorch) may help.
 
 
 ## Data preparation
